@@ -32,53 +32,65 @@ def signup():
     
     return render_template('signup.html')
 
-@app.route('/login', methods = ['GET', 'POST'])
+@app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
         email = request.form['email']
         password = request.form['password']
 
-        if 'attempts' not in session:
-            session['attempts'] = 0
-        
+        if email not in session:
+            session[email] = 0  # Track attempts for this specific email
+
         if os.path.exists('locked.txt'):    
             with open('locked.txt', 'r') as locked_file:
                 locked_emails = [line.strip() for line in locked_file]
             if email in locked_emails:
                 flash('Your account has been locked due to too many failed login attempts.')
                 return redirect(url_for('login'))
-            
         
         hash_password = hashlib.sha256(password.encode()).hexdigest()
         login_success = False
 
-        with open ('credentials.txt', 'r') as f:
+        with open('credentials.txt', 'r') as f:
             for line in f:
                 stored_email, stored_hash = line.strip().split()
                 if email == stored_email and hash_password == stored_hash:
-                   login_success = True
-                   break
-                   
-                    
-                    
+                    login_success = True
+                    break
+        
         if login_success:
             flash('Login successful! Welcome back.')
-            session.pop('attempts', None)
-            return redirect(url_for('login')) 
+            session['email'] = email  # Save who is logged in
+            session.pop(email, None)  # Reset attempt counter for this email
+            return redirect(url_for('dashboard'))
         else:
-            session['attempts'] += 1
-            if session['attempts'] >= 3:
+            session[email] += 1
+            if session[email] >= 3:
                 with open('locked.txt', 'a') as locked_file:
                     locked_file.write(email + '\n')
                 flash('Too many failed attempts. Your account has been locked.')
-                session.pop('attempts', None) #clear attempts
+                session.pop(email, None)  # Clear attempt counter
                 return redirect(url_for('login'))
             else:
-                flash('Incorrect email or password. Attempts left: {3 - session["attempts"]}')
+                flash(f'Incorrect email or password. Attempts left: {3 - session[email]}')
                 return redirect(url_for('login'))
     
     return render_template('login.html')
+    
+@app.route('/dashboard')
+def dashboard():
+    if 'email' not in session:
+        flash('You must be logged in first.')
+        return redirect(url_for('login'))
+    
+    return render_template('dashboard.html', email = session['email'])
 
+@app.route('/logout')
+def logout():
+    session.clear()
+    flash('You have been logged out successfully.')
+    return redirect(url_for('login'))
+    
 if __name__ == '__main__':
     app.run(debug=True)
 

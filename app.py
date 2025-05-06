@@ -9,7 +9,7 @@ app.secret_key = 'secret_key_1234'
 
 @app.route('/')
 def home():
-    return redirect(url_for('login'))
+    return render_template('home.html')
 
 @app.route('/signup', methods = ['GET', 'POST'])
 def signup():

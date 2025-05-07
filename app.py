@@ -24,9 +24,25 @@ def signup():
         
         hashed_password = hashlib.sha256(password.encode()).hexdigest()
 
-        with open ('credentials.txt', 'a') as f:
-            f.write(email + ' ' + hashed_password + '\n')
+        import sqlite3
+        conn = sqlite3.connect('database.db')
+        c = conn.cursor()
+
+        #check if email already exists
+        c.execute('SELECT * FROM users WHERE email = ?', (email,))
+        existing_user = c.fetchone()
+
+        if existing_user:
+            flash('Email already registered. Please log in!')
+            conn.close()
+            return redirect(url_for('login'))
         
+        #insert new user into database
+        c.execute('INSERT INTO users (email, password) VALUES (?, ?)', (email, hashed_password))
+
+        conn.commit()
+        conn.close()
+
         flash('Account created successfully! Please log in.')
         return redirect(url_for('login'))
     
@@ -38,52 +54,54 @@ def login():
         email = request.form['email']
         password = request.form['password']
 
-        if email not in session:
-            session[email] = 0  # Track attempts for this specific email
+        # Connect to database
+        import sqlite3
+        conn = sqlite3.connect('database.db')
+        c = conn.cursor()
 
-        if os.path.exists('locked.txt'):    
-            with open('locked.txt', 'r') as locked_file:
-                locked_emails = [line.strip() for line in locked_file]
-            if email in locked_emails:
+        # Check if email exists and get password + lock status
+        c.execute('SELECT password, is_locked FROM users WHERE email = ?', (email,))
+        user_data = c.fetchone()
+
+        conn.close()
+
+        if user_data:
+            db_password, is_locked = user_data
+
+            if is_locked == 1:
                 flash('Your account has been locked due to too many failed login attempts.')
                 return redirect(url_for('login'))
-        
-        hash_password = hashlib.sha256(password.encode()).hexdigest()
-        login_success = False
 
-        with open('credentials.txt', 'r') as f:
-            for line in f:
-                stored_email, stored_hash = line.strip().split()
-                if email == stored_email and hash_password == stored_hash:
-                    login_success = True
-                    break
-        
-        if login_success:
-            flash('Login successful! Welcome back.')
-            session['email'] = email  # Save who is logged in
-            session.pop(email, None)  # Reset attempt counter for this email
-            return redirect(url_for('dashboard'))
-        else:
-            session[email] += 1
-            if session[email] >= 3:
-                with open('locked.txt', 'a') as locked_file:
-                    locked_file.write(email + '\n')
-                flash('Too many failed attempts. Your account has been locked.')
-                session.pop(email, None)  # Clear attempt counter
-                return redirect(url_for('login'))
+            hashed_password = hashlib.sha256(password.encode()).hexdigest()
+
+            if hashed_password == db_password:
+                flash('Login successful! Welcome back.')
+                session['email'] = email  # Save logged-in user
+                session.pop(email, None)  # Reset attempt counter
+                return redirect(url_for('dashboard'))
             else:
-                flash(f'Incorrect email or password. Attempts left: {3 - session[email]}')
-                return redirect(url_for('login'))
+                # Incorrect password
+                session[email] = session.get(email, 0) + 1
+                if session[email] >= 3:
+                    # Lock the account in database
+                    conn = sqlite3.connect('database.db')
+                    c = conn.cursor()
+                    c.execute('UPDATE users SET is_locked = 1 WHERE email = ?', (email,))
+                    conn.commit()
+                    conn.close()
+
+                    flash('Too many failed attempts. Your account has been locked.')
+                    session.pop(email, None)
+                    return redirect(url_for('login'))
+                else:
+                    flash(f'Incorrect password. Attempts left: {3 - session[email]}')
+                    return redirect(url_for('login'))
+        else:
+            # Email not found
+            flash('Email not found. Please sign up first!')
+            return redirect(url_for('signup'))
     
-    return render_template('login.html')
-    
-@app.route('/dashboard')
-def dashboard():
-    if 'email' not in session:
-        flash('You must be logged in first.')
-        return redirect(url_for('login'))
-    
-    return render_template('dashboard.html', email = session['email'])
+    return render_template('login.html')('dashboard.html', email = session['email'])
 
 @app.route('/logout')
 def logout():
